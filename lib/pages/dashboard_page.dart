@@ -1,8 +1,10 @@
+import 'package:dashboard_web/pages/control_center_page.dart';
 import 'package:flutter/material.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/weather_card.dart';
 import '../widgets/photobioreactor_panel.dart';
 import '../widgets/weekly_performance.dart';
+import '../pages/photobioreactor_page.dart'; // Import the new page
 
 class DashboardPage extends StatefulWidget {
   @override
@@ -44,6 +46,12 @@ class _DashboardPageState extends State<DashboardPage> {
             ],
           ),
         );
+      case 1:
+        // This is the Photobioreactors page
+        return const PhotobioreactorPage();
+      case 2:
+        // This is the Control Center Page
+        return const ControlCenterPage();
       default:
         return Center(
           child: Text(
