@@ -5,7 +5,8 @@ import '../widgets/weather_card.dart';
 import '../widgets/photobioreactor_panel.dart';
 import '../widgets/weekly_performance.dart';
 import '../pages/photobioreactor_page.dart';
-import '../pages/health_score_page.dart';
+import '../pages/control_center_page.dart';
+import '../pages/health_score_page.dart'; // Add this import
 
 class DashboardPage extends StatefulWidget {
   @override
