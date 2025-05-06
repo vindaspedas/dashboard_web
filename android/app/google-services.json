@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "592045837216",
+    "project_id": "greenpulsedash",
+    "storage_bucket": "greenpulsedash.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:592045837216:android:55d37dad944333842172c5",
+        "android_client_info": {
+          "package_name": "com.example.dashboard_web"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCRgkLHO9JonVHud49dEEjIv5Ds-WyZSCY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
