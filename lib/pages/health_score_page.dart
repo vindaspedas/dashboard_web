@@ -1,472 +1,630 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'dart:async';
 import 'package:intl/intl.dart';
-import '../widgets/custom_card.dart';
-import '../widgets/responsive.dart';
 
 class HealthScorePage extends StatefulWidget {
   const HealthScorePage({Key? key}) : super(key: key);
 
-  @override
+  @override 
   _HealthScorePageState createState() => _HealthScorePageState();
 }
 
-class _HealthScorePageState extends State<HealthScorePage> {
+class _HealthScorePageState extends State<HealthScorePage> with TickerProviderStateMixin {
+  // Firebase reference
   final DatabaseReference _healthScoreRef = FirebaseDatabase.instance.ref().child('health_score');
-  final Map<String, double> _thresholds = {
-    'temperature': 40.0, // Celsius
-    'humidity': 80.0, // Percentage
-    'pressure': 1050.0, // hPa
-    'vibration': 50.0, // mm/s²
-  };
   
-  Map<String, dynamic> _sensorData = {};
-  List<Map<String, dynamic>> _anomalyHistory = [];
+  // Animation controllers
+  late AnimationController _cardAnimationController;
+  late AnimationController _buttonAnimationController;
+  late Animation<double> _cardScaleAnimation;
+  late Animation<double> _buttonScaleAnimation;
+  
+  // Data holders
+  Map<String, dynamic> _sensorsData = {};
+  List<Map<String, dynamic>> _anomaliesData = [];
   bool _isLoading = true;
+  Timer? _refreshTimer;
+  String _lastUpdated = 'Never';
 
   @override
   void initState() {
     super.initState();
-    _fetchSensorData();
-    _listenForAnomalies();
-  }
-
-  void _fetchSensorData() async {
-    try {
-      final snapshot = await _healthScoreRef.child('sensors').get();
-      if (snapshot.exists) {
-        setState(() {
-          _sensorData = Map<String, dynamic>.from(snapshot.value as Map);
-          _isLoading = false;
-        });
-      } else {
-        // Create placeholder data if none exists
-        _createPlaceholderData();
-      }
-    } catch (e) {
-      debugPrint('Error fetching sensor data: $e');
-      _createPlaceholderData();
-    }
-  }
-
-  void _createPlaceholderData() async {
-    final Map<String, dynamic> placeholderData = {
-      'temperature': 32.5,
-      'humidity': 65.2,
-      'pressure': 1013.0,
-      'vibration': 20.3,
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
     
+    // Initialize animations
+    _cardAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 700),
+      vsync: this,
+    );
+    
+    _buttonAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    
+    _cardScaleAnimation = CurvedAnimation(
+      parent: _cardAnimationController,
+      curve: Curves.easeInOut,
+    );
+    
+    _buttonScaleAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.95,
+    ).animate(CurvedAnimation(
+      parent: _buttonAnimationController,
+      curve: Curves.easeInOut,
+    ));
+    
+    // Fetch initial data
+    _fetchData();
+    
+    // Set up periodic data refresh (every 30 seconds)
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _fetchData();
+    });
+    
+    // Start animations
+    _cardAnimationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _cardAnimationController.dispose();
+    _buttonAnimationController.dispose();
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  // Fetch data from Firebase
+  Future<void> _fetchData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      await _healthScoreRef.child('sensors').set(placeholderData);
+      // Fetch sensors data
+      final sensorsSnapshot = await _healthScoreRef.child('sensors').get();
+      if (sensorsSnapshot.exists) {
+        setState(() {
+          _sensorsData = Map<String, dynamic>.from(sensorsSnapshot.value as Map);
+        });
+      }
+
+      // Fetch anomalies data
+      final anomaliesSnapshot = await _healthScoreRef.child('anomalies').get();
+      if (anomaliesSnapshot.exists) {
+        final anomaliesMap = Map<String, dynamic>.from(anomaliesSnapshot.value as Map);
+        final anomaliesList = <Map<String, dynamic>>[];
+        
+        anomaliesMap.forEach((key, value) {
+          final anomaly = Map<String, dynamic>.from(value as Map);
+          anomaly['id'] = key;
+          anomaliesList.add(anomaly);
+        });
+        
+        // Sort anomalies by timestamp (newest first)
+        anomaliesList.sort((a, b) => (b['timestamp'] as int).compareTo(a['timestamp'] as int));
+        
+        setState(() {
+          _anomaliesData = anomaliesList;
+        });
+      }
+
+      // Update last refreshed time
       setState(() {
-        _sensorData = placeholderData;
+        _isLoading = false;
+        _lastUpdated = DateFormat('MMM dd, yyyy - HH:mm:ss').format(DateTime.now());
+      });
+    } catch (error) {
+      print('Error fetching data: $error');
+      setState(() {
         _isLoading = false;
       });
-      debugPrint('Placeholder data created successfully');
-    } catch (e) {
-      debugPrint('Error creating placeholder data: $e');
     }
   }
 
-  void _listenForAnomalies() {
-    _healthScoreRef.child('anomalies').onValue.listen((event) {
-      if (event.snapshot.exists) {
-        final data = event.snapshot.value as Map<dynamic, dynamic>;
-        setState(() {
-          _anomalyHistory = [];
-          data.forEach((key, value) {
-            _anomalyHistory.add(Map<String, dynamic>.from(value as Map));
-          });
-          // Sort by timestamp (newest first)
-          _anomalyHistory.sort((a, b) => (b['timestamp'] as int).compareTo(a['timestamp'] as int));
-        });
-      }
-    });
-  }
-
-  bool _isAnomaly(String sensorType, double value) {
-    if (!_thresholds.containsKey(sensorType)) return false;
-    return value > _thresholds[sensorType]!;
-  }
-
-  Future<void> _logAnomaly(String sensorType, double value) async {
-    final anomaly = {
-      'sensorType': sensorType,
-      'value': value,
-      'threshold': _thresholds[sensorType],
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    
-    try {
-      await _healthScoreRef.child('anomalies').push().set(anomaly);
-      debugPrint('Anomaly logged successfully');
-    } catch (e) {
-      debugPrint('Error logging anomaly: $e');
+  // Get color based on sensor value compared to thresholds
+  Color _getSensorColor(String sensorType, dynamic value) {
+    switch (sensorType) {
+      case 'temperature':
+        return value > 40.0 ? Colors.red : (value > 35.0 ? Colors.orange : Colors.green);
+      case 'humidity':
+        return value > 85.0 ? Colors.red : (value > 75.0 ? Colors.orange : Colors.green);
+      case 'pressure':
+        return value < 980.0 ? Colors.red : (value < 1000.0 ? Colors.orange : Colors.green);
+      case 'vibration':
+        return value > 30.0 ? Colors.red : (value > 25.0 ? Colors.orange : Colors.green);
+      default:
+        return Colors.green;
     }
   }
 
-  Future<void> _updateSensorValue(String sensorType, double value) async {
-    try {
-      await _healthScoreRef.child('sensors').update({
-        sensorType: value,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
-      
-      // Check for anomaly
-      if (_isAnomaly(sensorType, value)) {
-        await _logAnomaly(sensorType, value);
-      }
-      
-      setState(() {
-        _sensorData[sensorType] = value;
-        _sensorData['timestamp'] = DateTime.now().millisecondsSinceEpoch;
-      });
-    } catch (e) {
-      debugPrint('Error updating sensor value: $e');
+  // Get icon based on sensor type
+  IconData _getSensorIcon(String sensorType) {
+    switch (sensorType) {
+      case 'temperature':
+        return Icons.thermostat;
+      case 'humidity':
+        return Icons.water_drop;
+      case 'pressure':
+        return Icons.speed;
+      case 'vibration':
+        return Icons.vibration;
+      default:
+        return Icons.sensors;
     }
   }
 
-  String _getFormattedDate(int timestamp) {
+  // Format sensor value with appropriate unit
+  String _formatSensorValue(String sensorType, dynamic value) {
+    switch (sensorType) {
+      case 'temperature':
+        return '$value°C';
+      case 'humidity':
+        return '$value%';
+      case 'pressure':
+        return '$value hPa';
+      case 'vibration':
+        return '$value Hz';
+      default:
+        return value.toString();
+    }
+  }
+
+  // Format timestamp to readable date
+  String _formatTimestamp(int timestamp) {
     final date = DateTime.fromMillisecondsSinceEpoch(timestamp);
     return DateFormat('MMM dd, yyyy - HH:mm:ss').format(date);
   }
 
-  Color _getHealthStatusColor(double overallScore) {
-    if (overallScore >= 90) return Colors.green;
-    if (overallScore >= 70) return Colors.amber;
-    return Colors.red;
+  // Build sensor value card
+  Widget _buildSensorCard(String sensorType, dynamic value) {
+    final color = _getSensorColor(sensorType, value);
+    final icon = _getSensorIcon(sensorType);
+    final formattedValue = _formatSensorValue(sensorType, value);
+    
+    return ScaleTransition(
+      scale: _cardScaleAnimation,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.2),
+              spreadRadius: 2,
+              blurRadius: 5,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 48,
+              color: color,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              sensorType.toUpperCase(),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              formattedValue,
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  IconData _getSensorIcon(String sensorType) {
-    switch (sensorType) {
-      case 'temperature': return FontAwesomeIcons.temperatureHigh;
-      case 'humidity': return FontAwesomeIcons.droplet;
-      case 'pressure': return FontAwesomeIcons.gauge;
-      case 'vibration': return FontAwesomeIcons.vial;
-      default: return FontAwesomeIcons.solidCircle;
+  // Build animated button
+  Widget _buildAnimatedButton({
+    required String text,
+    required Color color,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return GestureDetector(
+      onTapDown: (_) => _buttonAnimationController.forward(),
+      onTapUp: (_) => _buttonAnimationController.reverse(),
+      onTapCancel: () => _buttonAnimationController.reverse(),
+      onTap: onPressed,
+      child: ScaleTransition(
+        scale: _buttonScaleAnimation,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.4),
+                spreadRadius: 1,
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Build health status indicator
+  Widget _buildHealthStatusIndicator() {
+    // Calculate health score based on number of anomalies
+    final int anomalyCount = _anomaliesData.length;
+    final double healthScore = anomalyCount > 0 ? (100 - (anomalyCount * 15)).clamp(0, 100).toDouble() : 100.0;
+    
+    Color statusColor;
+    String statusText;
+    
+    if (healthScore >= 80) {
+      statusColor = Colors.green;
+      statusText = 'Excellent';
+    } else if (healthScore >= 60) {
+      statusColor = Colors.orange;
+      statusText = 'Good';
+    } else if (healthScore >= 40) {
+      statusColor = Colors.amber;
+      statusText = 'Warning';
+    } else {
+      statusColor = Colors.red;
+      statusText = 'Critical';
     }
+    
+    return ScaleTransition(
+      scale: _cardScaleAnimation,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.2),
+              spreadRadius: 2,
+              blurRadius: 5,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            const Text(
+              'SYSTEM HEALTH',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  height: 150,
+                  width: 150,
+                  child: CircularProgressIndicator(
+                    value: healthScore / 100,
+                    strokeWidth: 12,
+                    backgroundColor: Colors.grey[200],
+                    valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+                  ),
+                ),
+                Column(
+                  children: [
+                    Text(
+                      '${healthScore.toInt()}%',
+                      style: TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor,
+                      ),
+                    ),
+                    Text(
+                      statusText,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w500,
+                        color: statusColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Detected Anomalies: $anomalyCount',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: anomalyCount > 0 ? Colors.red : Colors.green,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
-  String _getSensorUnit(String sensorType) {
-    switch (sensorType) {
-      case 'temperature': return '°C';
-      case 'humidity': return '%';
-      case 'pressure': return 'hPa';
-      case 'vibration': return 'mm/s²';
-      default: return '';
-    }
-  }
-
-  double _calculateOverallHealth() {
-    if (_sensorData.isEmpty) return 0;
+  // Build anomaly list item
+  Widget _buildAnomalyListItem(Map<String, dynamic> anomaly) {
+    final sensorType = anomaly['sensorType'] as String;
+    final value = anomaly['value'];
+    final threshold = anomaly['threshold'];
+    final timestamp = anomaly['timestamp'] as int;
+    final color = _getSensorColor(sensorType, value);
+    final icon = _getSensorIcon(sensorType);
     
-    double score = 100;
-    _thresholds.forEach((sensor, threshold) {
-      if (_sensorData.containsKey(sensor)) {
-        final value = _sensorData[sensor] as double;
-        if (_isAnomaly(sensor, value)) {
-          // Reduce score based on how much it exceeds the threshold
-          final percentExceeded = ((value - threshold) / threshold) * 100;
-          score -= percentExceeded.clamp(5, 25); // Deduct between 5-25 points
-        }
-      }
-    });
-    
-    return score.clamp(0, 100);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final overallHealthScore = _calculateOverallHealth();
-    final healthColor = _getHealthStatusColor(overallHealthScore);
-    
-    return Scaffold(
-      body: _isLoading 
-        ? const Center(child: CircularProgressIndicator())
-        : SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.2),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(color: color.withOpacity(0.5), width: 1),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              color: color,
+              size: 32,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Health Score',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  '${sensorType.toUpperCase()} ANOMALY',
+                  style: TextStyle(
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
+                    color: color,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 4),
                 Text(
-                  _getFormattedDate(DateTime.now().millisecondsSinceEpoch),
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  'Value: ${_formatSensorValue(sensorType, value)} (Threshold: ${_formatSensorValue(sensorType, threshold)})',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _formatTimestamp(timestamp),
+                  style: TextStyle(
+                    fontSize: 12,
                     color: Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                
-                // Overall health score card
-                CustomCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Overall System Health',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          Icon(
-                            overallHealthScore > 70 
-                              ? FontAwesomeIcons.checkCircle 
-                              : FontAwesomeIcons.exclamationTriangle,
-                            color: healthColor,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 120,
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            SizedBox(
-                              width: 120,
-                              height: 120,
-                              child: CircularProgressIndicator(
-                                value: overallHealthScore / 100,
-                                strokeWidth: 12,
-                                backgroundColor: Colors.grey[300],
-                                valueColor: AlwaysStoppedAnimation<Color>(healthColor),
-                              ),
-                            ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '${overallHealthScore.toStringAsFixed(1)}%',
-                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: healthColor,
-                                  ),
-                                ),
-                                Text(
-                                  overallHealthScore > 90 ? 'Excellent' : 
-                                    overallHealthScore > 70 ? 'Good' : 'Critical',
-                                  style: Theme.of(context).textTheme.bodyLarge,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // Sensor readings grid
-                Responsive(
-                  mobile: _sensorGridView(crossAxisCount: 1),
-                  tablet: _sensorGridView(crossAxisCount: 2),
-                  desktop: _sensorGridView(crossAxisCount: 4),
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // Anomaly detection history
-                CustomCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Anomaly Detection History',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          Icon(
-                            FontAwesomeIcons.history,
-                            color: Colors.blue[700],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _anomalyHistory.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 20),
-                              child: Center(
-                                child: Text('No anomalies detected'),
-                              ),
-                            )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _anomalyHistory.length > 5 ? 5 : _anomalyHistory.length,
-                              itemBuilder: (context, index) {
-                                final anomaly = _anomalyHistory[index];
-                                return ListTile(
-                                  leading: Icon(
-                                    _getSensorIcon(anomaly['sensorType']),
-                                    color: Colors.red,
-                                  ),
-                                  title: Text(
-                                    '${anomaly['sensorType'].toString().toUpperCase()} Anomaly Detected',
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                  subtitle: Text(
-                                    'Value: ${anomaly['value']} ${_getSensorUnit(anomaly['sensorType'])} '
-                                    '(Threshold: ${anomaly['threshold']} ${_getSensorUnit(anomaly['sensorType'])})\n'
-                                    '${_getFormattedDate(anomaly['timestamp'])}',
-                                  ),
-                                  isThreeLine: true,
-                                );
-                              },
-                            ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // Test controls for simulation
-                CustomCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Simulation Controls',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          Icon(
-                            FontAwesomeIcons.sliders,
-                            color: Colors.purple[700],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 16,
-                        runSpacing: 16,
-                        children: _thresholds.keys.map((sensorType) {
-                          return ElevatedButton.icon(
-                            icon: Icon(_getSensorIcon(sensorType)),
-                            label: Text('Trigger $sensorType anomaly'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () {
-                              final threshold = _thresholds[sensorType]!;
-                              final anomalyValue = threshold + (threshold * 0.2); // 20% above threshold
-                              _updateSensorValue(sensorType, anomalyValue);
-                            },
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        icon: const Icon(FontAwesomeIcons.rotate),
-                        label: const Text('Reset all sensors to normal'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () {
-                          _thresholds.keys.forEach((sensorType) {
-                            final normalValue = _thresholds[sensorType]! * 0.7; // 70% of threshold
-                            _updateSensorValue(sensorType, normalValue);
-                          });
-                        },
-                      ),
-                    ],
                   ),
                 ),
               ],
             ),
           ),
+        ],
+      ),
     );
   }
 
-  Widget _sensorGridView({required int crossAxisCount}) {
-    return GridView.count(
-      crossAxisCount: crossAxisCount,
-      childAspectRatio: 1.5,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      children: _thresholds.keys.map((sensorType) {
-        final value = _sensorData[sensorType] as double? ?? 0.0;
-        final isAnomaly = _isAnomaly(sensorType, value);
-        
-        return CustomCard(
-          color: isAnomaly ? Colors.red.withOpacity(0.1) : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    sensorType.toUpperCase(),
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Icon(
-                    _getSensorIcon(sensorType),
-                    color: isAnomaly ? Colors.red : Colors.blue[700],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    value.toStringAsFixed(1),
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: isAnomaly ? Colors.red : Colors.grey[800],
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[100],
+      body: _isLoading
+          ? const Center(
+              child: CircularProgressIndicator(),
+            )
+          : RefreshIndicator(
+              onRefresh: _fetchData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header section
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Health Score Dashboard',
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Last updated: $_lastUpdated',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                        _buildAnimatedButton(
+                          text: 'Refresh Data',
+                          color: Colors.blue,
+                          icon: Icons.refresh,
+                          onPressed: _fetchData,
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _getSensorUnit(sensorType),
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.grey[600],
+                    const SizedBox(height: 24),
+                    
+                    // Health status card
+                    _buildHealthStatusIndicator(),
+                    const SizedBox(height: 24),
+                    
+                    // Sensor readings
+                    const Text(
+                      'Current Sensor Readings',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              LinearProgressIndicator(
-                value: value / (_thresholds[sensorType]! * 1.5),
-                backgroundColor: Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  isAnomaly ? Colors.red : Colors.green,
+                    const SizedBox(height: 16),
+                    _sensorsData.isNotEmpty
+                        ? GridView.count(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 16,
+                            mainAxisSpacing: 16,
+                            children: [
+                              _buildSensorCard('temperature', _sensorsData['temperature']),
+                              _buildSensorCard('humidity', _sensorsData['humidity']),
+                              _buildSensorCard('pressure', _sensorsData['pressure']),
+                              _buildSensorCard('vibration', _sensorsData['vibration']),
+                            ],
+                          )
+                        : const Center(
+                            child: Text('No sensor data available'),
+                          ),
+                    const SizedBox(height: 32),
+                    
+                    // Action buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildAnimatedButton(
+                          text: 'Generate Report',
+                          color: Colors.green,
+                          icon: Icons.description,
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Generating health report...'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 16),
+                        _buildAnimatedButton(
+                          text: 'Reset Anomalies',
+                          color: Colors.red,
+                          icon: Icons.refresh,
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('This would reset anomalies in a real system'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    
+                    // Anomalies section
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Detected Anomalies',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${_anomaliesData.length} found',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: _anomaliesData.isNotEmpty ? Colors.red : Colors.green,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _anomaliesData.isNotEmpty
+                        ? Column(
+                            children: _anomaliesData
+                                .map((anomaly) => _buildAnomalyListItem(anomaly))
+                                .toList(),
+                          )
+                        : Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.green.withOpacity(0.5)),
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'No anomalies detected - System is running optimally',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                    const SizedBox(height: 20),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Threshold: ${_thresholds[sensorType]!} ${_getSensorUnit(sensorType)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
+            ),
     );
   }
 }
