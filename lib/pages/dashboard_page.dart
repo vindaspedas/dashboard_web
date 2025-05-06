@@ -4,7 +4,8 @@ import '../widgets/sidebar.dart';
 import '../widgets/weather_card.dart';
 import '../widgets/photobioreactor_panel.dart';
 import '../widgets/weekly_performance.dart';
-import '../pages/photobioreactor_page.dart'; // Import the new page
+import '../pages/photobioreactor_page.dart';
+import '../pages/health_score_page.dart';
 
 class DashboardPage extends StatefulWidget {
   @override
@@ -19,6 +20,7 @@ class _DashboardPageState extends State<DashboardPage> {
     "Home",
     "Photobioreactors",
     "Control Center",
+    "Health Score"
   ];
 
   Widget _buildPageContent() {
@@ -52,6 +54,9 @@ class _DashboardPageState extends State<DashboardPage> {
       case 2:
         // This is the Control Center Page
         return const ControlCenterPage();
+      case 3:
+        // This is the health score page
+        return const HealthScorePage();
       default:
         return Center(
           child: Text(
