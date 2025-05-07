@@ -36,7 +36,7 @@ class _PhotobioreactorPageState extends State<PhotobioreactorPage> {
   List<FlSpot> generateTurbidityData() {
     final Random random = Random();
     return List.generate(24, (index) {
-      return FlSpot(index.toDouble(), 50 + random.nextDouble() * 100);
+      return FlSpot(index.toDouble(), 50 + random.nextDouble() * 10);
     });
   }
 
