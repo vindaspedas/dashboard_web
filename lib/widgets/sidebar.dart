@@ -49,6 +49,10 @@ class Sidebar extends StatelessWidget {
                   case 2:
                     icon = FontAwesomeIcons.gear;
                     break;
+                  case 3:
+                    icon = FontAwesomeIcons.stethoscope;
+                  case 4:
+                    icon = FontAwesomeIcons.calendarDays;
                   default:
                     icon = FontAwesomeIcons.circle;
                 }

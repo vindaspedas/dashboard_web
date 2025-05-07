@@ -6,7 +6,8 @@ import '../widgets/photobioreactor_panel.dart';
 import '../widgets/weekly_performance.dart';
 import '../pages/photobioreactor_page.dart';
 import '../pages/control_center_page.dart';
-import '../pages/health_score_page.dart'; // Add this import
+import '../pages/health_score_page.dart';
+import '../pages/scheduler_page.dart';
 
 class DashboardPage extends StatefulWidget {
   @override
@@ -21,7 +22,8 @@ class _DashboardPageState extends State<DashboardPage> {
     "Home",
     "Photobioreactors",
     "Control Center",
-    "Health Score"
+    "Health Score",
+    "Scheduler"
   ];
 
   Widget _buildPageContent() {
@@ -58,6 +60,9 @@ class _DashboardPageState extends State<DashboardPage> {
       case 3:
         // This is the health score page
         return const HealthScorePage();
+      case 4:
+        // This is scheduler page
+        return const SchedulerPage();
       default:
         return Center(
           child: Text(
