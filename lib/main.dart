@@ -27,7 +27,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Dashboard Web',
+      title: 'GreenPulse Dashboard',
       debugShowCheckedModeBanner: false,
       home: DashboardPage(),
     );

@@ -71,21 +71,6 @@ class Sidebar extends StatelessWidget {
               },
             ),
           ),
-
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: ListTile(
-              leading: FaIcon(FontAwesomeIcons.arrowRightFromBracket, color: Colors.red[200]),
-              title: isCollapsed
-                  ? null
-                  : Text("Logout", style: TextStyle(color: Colors.red[200])),
-              onTap: () {
-                // Handle logout
-              },
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              hoverColor: Colors.red[400]?.withOpacity(0.2),
-            ),
-          ),
         ],
       ),
     );
